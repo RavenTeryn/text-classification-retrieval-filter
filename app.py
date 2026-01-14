@@ -10,15 +10,71 @@ from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 
-# --- 2. 页面设置 (改为侧边栏导航风格) ---
+# --- 2. 页面设置 (去 Emoji，改用专业图标) ---
 st.set_page_config(
-    page_title="多领域知识分类检索系统",
-    page_icon="📂",
+    page_title="InfoStream - 专业资讯归档系统",
+    page_icon="📑",  # 仅保留标题栏一个图标
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- 3. 核心逻辑：自动分类与索引 ---
+# --- 3. CSS 深度定制 (去卡片化，走专业文档风) ---
+st.markdown("""
+<style>
+    /* 全局字体与背景 - 更加冷淡严谨 */
+    .stApp {
+        background-color: #FAFAFA;
+    }
+    
+    /* 侧边栏样式重置 */
+    [data-testid="stSidebar"] {
+        background-color: #F0F2F6;
+        border-right: 1px solid #E0E0E0;
+    }
+    
+    /* 标题样式 - 深色衬线体 */
+    h1, h2, h3 {
+        color: #262730;
+        font-family: 'Helvetica Neue', sans-serif;
+    }
+    
+    /* 搜索结果列表项样式 (替代之前的 Card) */
+    .result-item {
+        padding: 15px 0;
+        border-bottom: 1px solid #E6E6E6;
+    }
+    .result-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #1A73E8; /* Google Link Blue */
+        margin-bottom: 5px;
+    }
+    .result-meta {
+        font-size: 0.85rem;
+        color: #5F6368;
+        font-family: monospace;
+        margin-bottom: 8px;
+    }
+    .result-snippet {
+        font-size: 0.95rem;
+        color: #3C4043;
+        line-height: 1.5;
+    }
+    
+    /* 隐藏 Streamlit 默认的按钮边框，让界面更干净 */
+    div.stButton > button {
+        border-radius: 4px;
+        background-color: #008080; /* Teal Color */
+        color: white;
+        border: none;
+    }
+    div.stButton > button:hover {
+        background-color: #006666;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# --- 4. 核心逻辑：自动分类与索引 ---
 @st.cache_resource
 def initialize_system():
     embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-small-zh-v1.5")
@@ -28,41 +84,37 @@ def initialize_system():
     raw_docs = loader.load()
     
     if not raw_docs:
-        return None, None, {}
+        return None, None, []
 
-    # --- 关键修改：自动打标签 (Text Classification 模拟) ---
+    # --- 关键修改：自动打标签 ---
     categorized_docs = []
-    categories = set()
     
-    # 1. 定义新的关键词列表 (对应生成数据的三个类别)
-    # AI 保持不变
+    # 关键词定义 (保持你的新分类)
     ai_keywords = ['learning', 'neural', 'intelligence', 'gpt', 'python', 'data', 'cloud']
-    
-    # FinTech (金融科技) - 替代原来的 geo
     fintech_keywords = ['blockchain', 'bitcoin', 'payment', 'finance', 'wallet', 'economy', 'bank']
-    
-    # Humanities (人文常识) - 替代原来的 sci
     humanities_keywords = ['history', 'culture', 'art', 'philosophy', 'literature', 'civilization', 'museum']
     
     for doc in raw_docs:
         filename = doc.metadata['source'].lower()
         content = doc.page_content.lower()
         
-        # 默认分类
-        category = "其他资讯 (General)"
+        # 默认分类 (无 Emoji)
+        category = "General / Uncategorized"
         
-        # 根据文件名或内容判断分类
+        # 根据文件名或内容判断分类 (移除 Emoji)
         if any(k in filename or k in content for k in ai_keywords):
-            category = "🤖 AI与前沿技术"
+            category = "AI & Technology"
         elif any(k in filename or k in content for k in fintech_keywords):
-            category = "💰 金融科技观察"
+            category = "FinTech & Economy"
         elif any(k in filename or k in content for k in humanities_keywords):
-            category = "📚 人文历史常识"
+            category = "Humanities & History"
             
-        # 将分类写入 metadata
         doc.metadata['category'] = category
         categorized_docs.append(doc)
-        categories.add(category)
+
+    # 强制定义分类列表顺序 (解决分类显示不全的问题)
+    # 即使文件夹里没有文件，这些选项也会显示，保证 UI 结构完整
+    fixed_categories = ["AI & Technology", "FinTech & Economy", "Humanities & History", "General / Uncategorized"]
 
     # 切分文档
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=300, chunk_overlap=50)
@@ -71,67 +123,98 @@ def initialize_system():
     # 建立向量索引
     vector_db = FAISS.from_documents(splits, embeddings)
     
-    return vector_db, raw_docs, list(categories)
+    return vector_db, raw_docs, fixed_categories
 
-# --- 4. 初始化 ---
-with st.spinner("正在加载分类模型与知识库..."):
+# --- 5. 初始化 ---
+with st.spinner("Initializing Archives..."):
     vector_db, raw_docs, category_list = initialize_system()
 
-# --- 5. UI 布局：左侧筛选，右侧检索 ---
-# Topic 2 要求：Classification labels as filters 
-
+# --- 6. 侧边栏：控制面板风格 ---
 with st.sidebar:
-    st.header("📂 领域导航")
-    st.markdown("请选择要检索的知识领域：")
+    st.markdown("### 🗂️ Document Navigator")
     
-    # 添加“全部”选项
+    # 使用 Radio 组件但样式更简洁
     selected_category = st.radio(
-        "选择分类 (Topic Filter):",
-        ["🌐 全部领域 (All Topics)"] + sorted(list(category_list))
+        "Select Category:",
+        ["ALL ARCHIVES"] + category_list
     )
     
     st.markdown("---")
-    st.info(f"📚 当前库中文档总数: {len(raw_docs)}")
-    if selected_category != "🌐 全部领域 (All Topics)":
-        # 统计当前分类下的文档数
-        count = sum(1 for d in raw_docs if d.metadata.get('category') == selected_category)
-        st.success(f"当前分类包含文档: {count} 篇")
-
-# 主界面
-st.title("📑 Topic-Filtered Retrieval System")
-st.caption("基于文本分类的定向检索系统 | Topic 2 Implementation")
-
-# 搜索区
-query = st.text_input("在该领域内搜索关键词...", placeholder="输入查询内容...")
-search_btn = st.button("🔍 检索文档", type="primary")
-
-if (query or search_btn) and vector_db:
-    # --- 检索逻辑 ---
-    # 1. 先进行向量检索 (召回 Top 10，多拿一点方便后面过滤)
-    results = vector_db.similarity_search(query, k=15)
     
-    # 2. 后置过滤 (Post-filtering)：只保留用户选中分类的结果
-    if selected_category != "🌐 全部领域 (All Topics)":
+    # 仪表盘式的数据展示
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric(label="Total Docs", value=len(raw_docs))
+    with col2:
+        if selected_category != "ALL ARCHIVES":
+            count = sum(1 for d in raw_docs if d.metadata.get('category') == selected_category)
+            st.metric(label="Current", value=count)
+        else:
+            st.metric(label="Current", value="All")
+
+    st.markdown("---")
+    st.caption("System v2.0 | Topic 2 Classification Build")
+
+# --- 7. 主界面：搜索引擎风格 ---
+
+st.markdown("## 🔎 Information Retrieval System")
+st.markdown("Type keywords to search across the categorized database.")
+
+# 搜索栏布局：更像 Google
+search_col1, search_col2 = st.columns([5, 1], vertical_alignment="bottom")
+
+with search_col1:
+    query = st.text_input("Search Query", placeholder="e.g., impact of blockchain", label_visibility="collapsed")
+with search_col2:
+    search_btn = st.button("Search", use_container_width=True)
+
+st.markdown("---")
+
+# --- 8. 检索与结果展示 (列表式，非卡片式) ---
+if (query or search_btn) and vector_db:
+    start_time = time.time()
+    
+    # 1. 宽泛召回
+    results = vector_db.similarity_search(query, k=20)
+    
+    # 2. 严格过滤
+    if selected_category != "ALL ARCHIVES":
         filtered_results = [doc for doc in results if doc.metadata.get('category') == selected_category]
     else:
         filtered_results = results
 
-    # 取前 4 个展示
-    final_results = filtered_results[:4]
+    # 取 Top 5
+    final_results = filtered_results[:5]
 
-    st.markdown(f"### 🔎 '{selected_category}' 领域下的检索结果")
-    
+    # 显示结果头
     if not final_results:
-        st.warning(f"在 '{selected_category}' 分类下未找到相关文档。")
+        st.warning(f"No results found in category: {selected_category}")
     else:
+        st.markdown(f"**Found {len(final_results)} relevant documents** ({time.time() - start_time:.4f}s)")
+        
         for doc in final_results:
             cat_tag = doc.metadata.get('category')
-            source_name = doc.metadata['source'].split('/')[-1]
+            file_name = doc.metadata['source'].split('/')[-1]
             
-            # 使用 Streamlit 的 expander 样式展示，看起来像文件列表
-            with st.expander(f"📄 {source_name}  [{cat_tag}]", expanded=True):
-                st.markdown(f"**...{doc.page_content}...**")
-                st.caption(f"来源: {doc.metadata['source']}")
+            # 使用 HTML 构建“谷歌学术”风格的列表
+            st.markdown(f"""
+            <div class="result-item">
+                <div class="result-title">📄 {file_name}</div>
+                <div class="result-meta">
+                    <span style="background-color: #E0F2F1; color: #00695C; padding: 2px 6px; border-radius: 4px;">{cat_tag}</span>
+                    &nbsp; • &nbsp; Relevance Match
+                </div>
+                <div class="result-snippet">
+                    ...{doc.page_content}...
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # 使用原生 expander 查看全文 (折叠起来保持干净)
+            with st.expander("View Full Context"):
+                st.text(doc.page_content)
 
 elif not vector_db:
-    st.error("未找到数据，请检查 data 文件夹。")
+    st.error("Database Error: Please check data directory.")
+elif not query:
+    st.info("Awaiting input... Select a category from the sidebar to browse.")
