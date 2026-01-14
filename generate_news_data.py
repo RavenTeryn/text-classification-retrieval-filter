@@ -1,7 +1,7 @@
 import os
 
 # 目标文件夹
-output_dir = "data"
+output_dir = "docs"
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
